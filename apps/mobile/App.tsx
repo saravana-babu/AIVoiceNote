@@ -1,6 +1,14 @@
-import React, { useState } from 'react';
-import { StyleSheet, View, SafeAreaView, ScrollView, useWindowDimensions } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import {
+  StyleSheet,
+  View,
+  SafeAreaView,
+  ScrollView,
+  useWindowDimensions,
+  ActivityIndicator,
+} from 'react-native';
 import { PaperProvider, Text, Divider, Switch, useTheme } from 'react-native-paper';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import {
   customLightTheme,
   customDarkTheme,
@@ -17,16 +25,81 @@ import {
   NoteCard,
 } from '@voicemind/ui';
 import { VoiceNote } from '@voicemind/shared';
+import { useAuthStore } from './src/store/authStore.js';
+import { useLogoutMutation } from './src/hooks/useAuth.js';
+import { LoginScreen } from './src/screens/LoginScreen.js';
+import { RegisterScreen } from './src/screens/RegisterScreen.js';
+import { ResetPasswordScreen } from './src/screens/ResetPasswordScreen.js';
+
+// Setup TanStack Query Client
+const queryClient = new QueryClient();
 
 export default function App() {
   const [isDarkMode, setIsDarkMode] = useState(true);
   const theme = isDarkMode ? customDarkTheme : customLightTheme;
 
   return (
-    <PaperProvider theme={theme}>
-      <MainAppContent isDarkMode={isDarkMode} setIsDarkMode={setIsDarkMode} />
-    </PaperProvider>
+    <QueryClientProvider client={queryClient}>
+      <PaperProvider theme={theme}>
+        <AuthGate isDarkMode={isDarkMode} setIsDarkMode={setIsDarkMode} />
+      </PaperProvider>
+    </QueryClientProvider>
   );
+}
+
+interface AuthGateProps {
+  isDarkMode: boolean;
+  setIsDarkMode: (val: boolean) => void;
+}
+
+type AuthScreen = 'login' | 'register' | 'reset_password';
+
+function AuthGate({ isDarkMode, setIsDarkMode }: AuthGateProps) {
+  const theme = useTheme();
+  const { isAuthenticated, isLoading, hydrate } = useAuthStore();
+  const [currentScreen, setCurrentScreen] = useState<AuthScreen>('login');
+
+  // Hydrate auth session tokens on startup
+  useEffect(() => {
+    hydrate();
+  }, [hydrate]);
+
+  if (isLoading) {
+    return (
+      <View style={[styles.loadingCenter, { backgroundColor: theme.colors.background }]}>
+        <ActivityIndicator size="large" color={theme.colors.primary} />
+        <Text style={styles.loadingText}>Loading VoiceMind AI...</Text>
+      </View>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return (
+      <SafeAreaView style={[styles.safeArea, { backgroundColor: theme.colors.background }]}>
+        <View style={styles.authHeader}>
+          <Text variant="labelLarge" style={styles.toggleText}>
+            {isDarkMode ? '🌙 Dark Mode' : '☀️ Light Mode'}
+          </Text>
+          <Switch value={isDarkMode} onValueChange={setIsDarkMode} />
+        </View>
+        {currentScreen === 'login' && (
+          <LoginScreen
+            onNavigateToRegister={() => setCurrentScreen('register')}
+            onNavigateToReset={() => setCurrentScreen('reset_password')}
+          />
+        )}
+        {currentScreen === 'register' && (
+          <RegisterScreen onNavigateToLogin={() => setCurrentScreen('login')} />
+        )}
+        {currentScreen === 'reset_password' && (
+          <ResetPasswordScreen onNavigateToLogin={() => setCurrentScreen('login')} />
+        )}
+      </SafeAreaView>
+    );
+  }
+
+  // Authenticated Dashboard Content
+  return <MainAppContent isDarkMode={isDarkMode} setIsDarkMode={setIsDarkMode} />;
 }
 
 interface MainContentProps {
@@ -38,6 +111,9 @@ function MainAppContent({ isDarkMode, setIsDarkMode }: MainContentProps) {
   const theme = useTheme();
   const { width } = useWindowDimensions();
   const isDesktop = width > 768;
+
+  const { user } = useAuthStore();
+  const logoutMutation = useLogoutMutation();
 
   // States for interactive showcase elements
   const [inputText, setInputText] = useState('');
@@ -65,7 +141,7 @@ function MainAppContent({ isDarkMode, setIsDarkMode }: MainContentProps) {
   };
 
   // Simulate progress when playing
-  React.useEffect(() => {
+  useEffect(() => {
     let interval: NodeJS.Timeout;
     if (isPlayingNote) {
       interval = setInterval(() => {
@@ -84,14 +160,22 @@ function MainAppContent({ isDarkMode, setIsDarkMode }: MainContentProps) {
             VoiceMind AI
           </Text>
           <Text variant="bodyMedium" style={{ color: theme.colors.secondary }}>
-            Design System Catalog
+            Signed in as: {user?.displayName || user?.email}
           </Text>
         </View>
-        <View style={styles.toggleRow}>
-          <Text variant="labelLarge" style={styles.toggleLabel}>
-            {isDarkMode ? '🌙 Dark Mode' : '☀️ Light Mode'}
-          </Text>
-          <Switch value={isDarkMode} onValueChange={setIsDarkMode} />
+        <View style={styles.headerRight}>
+          <View style={styles.toggleRow}>
+            <Text variant="labelMedium" style={styles.toggleLabel}>
+              {isDarkMode ? '🌙' : '☀️'}
+            </Text>
+            <Switch value={isDarkMode} onValueChange={setIsDarkMode} />
+          </View>
+          <Button
+            title="Logout"
+            onPress={() => logoutMutation.mutate()}
+            variant="danger"
+            style={styles.logoutBtn}
+          />
         </View>
       </View>
 
@@ -264,8 +348,29 @@ function MainAppContent({ isDarkMode, setIsDarkMode }: MainContentProps) {
 }
 
 const styles = StyleSheet.create({
+  loadingCenter: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    marginTop: 16,
+    fontSize: 16,
+    fontWeight: '600',
+  },
   safeArea: {
     flex: 1,
+  },
+  authHeader: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+    paddingTop: 16,
+    gap: 8,
+  },
+  toggleText: {
+    marginRight: 4,
   },
   header: {
     paddingHorizontal: 24,
@@ -275,16 +380,25 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
   },
+  headerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  logoutBtn: {
+    minHeight: 36,
+    paddingVertical: 0,
+  },
   title: {
     fontWeight: '800',
   },
   toggleRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 6,
   },
   toggleLabel: {
-    marginRight: 4,
+    marginRight: 2,
   },
   scrollContainer: {
     paddingHorizontal: 16,

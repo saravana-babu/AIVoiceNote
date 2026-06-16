@@ -36,6 +36,7 @@ pip-delete-this-directory.txt
 .coverage
 htmlcov/
 .uv/
+*.db
 
 # IDEs
 .idea/
