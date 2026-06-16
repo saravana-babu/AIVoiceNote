@@ -36,6 +36,7 @@ import { initializeDatabase } from './src/database/dbSetup.js';
 import { useSyncStore } from './src/store/syncStore.js';
 import { useNotesQuery, useSaveNoteMutation, useDeleteNoteMutation } from './src/hooks/useNotes.js';
 import { useAudioRecorder, AudioFormat, CrashRecoveryRecord } from '@voicemind/audio';
+import { useTranscription, LANGUAGE_CODES } from '@voicemind/transcription';
 
 // Setup TanStack Query Client
 const queryClient = new QueryClient();
@@ -161,6 +162,21 @@ function MainAppContent({ isDarkMode, setIsDarkMode }: MainContentProps) {
   } = useAudioRecorder(activeNoteId);
 
   const [recoveryRecord, setRecoveryRecord] = useState<CrashRecoveryRecord | null>(null);
+
+  // On-Device Transcription Engine integration
+  const [forcedLanguage, setForcedLanguage] = useState<string>('English');
+  const {
+    profiles: modelProfiles,
+    selectedProfileId,
+    setSelectedProfileId,
+    isDownloaded: isModelDownloaded,
+    downloadProgress: modelDownloadProgress,
+    isDownloading: isModelDownloading,
+    downloadModel,
+    deleteModel,
+    transcribeAudio,
+    isTranscribing,
+  } = useTranscription();
 
   useEffect(() => {
     async function checkRecovery() {
@@ -422,6 +438,21 @@ function MainAppContent({ isDarkMode, setIsDarkMode }: MainContentProps) {
                       const meta = await stopRecording();
                       if (meta) {
                         const noteId = activeNoteId || `note-${Date.now()}`;
+
+                        let transcribedText = 'Transcription failed / skipped.';
+                        let detectedLanguage = 'English';
+
+                        if (isModelDownloaded) {
+                          const res = await transcribeAudio(meta.uri, forcedLanguage);
+                          if (res) {
+                            transcribedText = res.text;
+                            detectedLanguage = res.language;
+                          }
+                        } else {
+                          transcribedText =
+                            'Audio recorded. Model not downloaded, transcription skipped.';
+                        }
+
                         const newNote = {
                           id: noteId,
                           title: `Voice Note ${new Date().toLocaleTimeString()}`,
@@ -432,9 +463,9 @@ function MainAppContent({ isDarkMode, setIsDarkMode }: MainContentProps) {
                         };
                         await saveNoteMutation.mutateAsync({
                           note: newNote,
-                          transcription: 'Audio recorded successfully.',
-                          summary: 'VoiceMind Audio Engine Recording',
-                          tags: ['recording', meta.format],
+                          transcription: transcribedText,
+                          summary: `VoiceMind Local ${detectedLanguage} Transcription`,
+                          tags: ['recording', meta.format, detectedLanguage.toLowerCase()],
                         });
                         setActiveNoteId(undefined);
                         alert('Recording saved to local SQLite database!');
@@ -448,26 +479,49 @@ function MainAppContent({ isDarkMode, setIsDarkMode }: MainContentProps) {
                 />
                 <View style={{ flex: 1 }}>
                   <Text style={styles.recordingLabel}>
-                    {isEngineRecording
-                      ? `Recording active: ${Math.floor(recordDurationSec / 60)
-                          .toString()
-                          .padStart(2, '0')}:${(recordDurationSec % 60)
-                          .toString()
-                          .padStart(2, '0')}`
-                      : 'Tap circle to record'}
+                    {isTranscribing
+                      ? 'Transcribing audio on-device...'
+                      : isEngineRecording
+                        ? `Recording active: ${Math.floor(recordDurationSec / 60)
+                            .toString()
+                            .padStart(2, '0')}:${(recordDurationSec % 60)
+                            .toString()
+                            .padStart(2, '0')}`
+                        : 'Tap circle to record'}
                   </Text>
                   {!isEngineRecording && (
-                    <View style={styles.formatRow}>
-                      {(['m4a', 'wav', 'mp3'] as AudioFormat[]).map((fmt) => (
-                        <Button
-                          key={fmt}
-                          title={fmt.toUpperCase()}
-                          onPress={() => setCurrentRecordingFormat(fmt)}
-                          variant={currentRecordingFormat === fmt ? 'primary' : 'secondary'}
-                          style={styles.formatBtn}
-                        />
-                      ))}
-                    </View>
+                    <>
+                      <View style={styles.formatRow}>
+                        {(['m4a', 'wav', 'mp3'] as AudioFormat[]).map((fmt) => (
+                          <Button
+                            key={fmt}
+                            title={fmt.toUpperCase()}
+                            onPress={() => setCurrentRecordingFormat(fmt)}
+                            variant={currentRecordingFormat === fmt ? 'primary' : 'secondary'}
+                            style={styles.formatBtn}
+                          />
+                        ))}
+                      </View>
+                      <View style={[styles.formatRow, { marginTop: 12 }]}>
+                        <Text
+                          variant="labelMedium"
+                          style={{ marginRight: 6, color: theme.colors.secondary }}
+                        >
+                          Lang:
+                        </Text>
+                        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                          {Object.keys(LANGUAGE_CODES).map((lang) => (
+                            <Button
+                              key={lang}
+                              title={lang}
+                              onPress={() => setForcedLanguage(lang)}
+                              variant={forcedLanguage === lang ? 'primary' : 'secondary'}
+                              style={StyleSheet.flatten([styles.formatBtn, { marginRight: 6 }])}
+                            />
+                          ))}
+                        </ScrollView>
+                      </View>
+                    </>
                   )}
                   {isEngineRecording && (
                     <Button
@@ -484,6 +538,59 @@ function MainAppContent({ isDarkMode, setIsDarkMode }: MainContentProps) {
                 Dynamic Waveform (Active during recording)
               </Text>
               <AudioWaveform isRecording={isEngineRecording} meteringHistory={meteringHistory} />
+            </Card>
+
+            <Card style={styles.cardSpacing}>
+              <Text variant="titleMedium" style={styles.cardHeader}>
+                Whisper On-Device Model Downloader
+              </Text>
+              <Text variant="bodySmall" style={styles.subtext}>
+                Download and select the Whisper model profile to run transcription locally on the
+                device offline.
+              </Text>
+
+              <View style={styles.fieldSpacing}>
+                <Text variant="labelLarge" style={{ marginBottom: 6, fontWeight: '700' }}>
+                  Select Profile:
+                </Text>
+                {modelProfiles.map((p) => (
+                  <Button
+                    key={p.id}
+                    title={`${p.name} (${p.sizeMB} MB)`}
+                    onPress={() => setSelectedProfileId(p.id)}
+                    variant={selectedProfileId === p.id ? 'primary' : 'secondary'}
+                    style={styles.fieldSpacing}
+                    disabled={isModelDownloading}
+                  />
+                ))}
+              </View>
+
+              <View style={styles.rowGapHorizontal}>
+                {!isModelDownloaded ? (
+                  <Button
+                    title={
+                      isModelDownloading
+                        ? `Downloading (${Math.round(modelDownloadProgress * 100)}%)`
+                        : 'Download Model'
+                    }
+                    onPress={downloadModel}
+                    loading={isModelDownloading}
+                    style={{ flex: 1 }}
+                  />
+                ) : (
+                  <>
+                    <Button
+                      title="Delete Model"
+                      variant="danger"
+                      onPress={deleteModel}
+                      style={{ flex: 1 }}
+                    />
+                    <Text style={[styles.successText, { marginLeft: 12, alignSelf: 'center' }]}>
+                      🟢 Downloaded
+                    </Text>
+                  </>
+                )}
+              </View>
             </Card>
 
             <Card style={styles.cardSpacing}>
@@ -763,5 +870,9 @@ const styles = StyleSheet.create({
   },
   recoveryBtn: {
     flex: 1,
+  },
+  successText: {
+    color: '#10B981',
+    fontWeight: '700',
   },
 });

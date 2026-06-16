@@ -16,6 +16,7 @@
     "@voicemind/audio": "*",
     "@voicemind/shared": "*",
     "@voicemind/storage": "*",
+    "@voicemind/transcription": "*",
     "@voicemind/ui": "*",
     "expo": "~52.0.36",
     "expo-status-bar": "~2.0.1",
