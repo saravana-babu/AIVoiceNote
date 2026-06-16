@@ -31,12 +31,24 @@ import { LoginScreen } from './src/screens/LoginScreen.js';
 import { RegisterScreen } from './src/screens/RegisterScreen.js';
 import { ResetPasswordScreen } from './src/screens/ResetPasswordScreen.js';
 
+// Offline-First additions
+import { initializeDatabase } from './src/database/dbSetup.js';
+import { useSyncStore } from './src/store/syncStore.js';
+import { useNotesQuery, useSaveNoteMutation, useDeleteNoteMutation } from './src/hooks/useNotes.js';
+
 // Setup TanStack Query Client
 const queryClient = new QueryClient();
 
 export default function App() {
   const [isDarkMode, setIsDarkMode] = useState(true);
   const theme = isDarkMode ? customDarkTheme : customLightTheme;
+
+  // Initialize SQLite structures on startup
+  useEffect(() => {
+    initializeDatabase().catch((err) => {
+      console.error('Failed to initialize local SQLite database', err);
+    });
+  }, []);
 
   return (
     <QueryClientProvider client={queryClient}>
@@ -115,11 +127,20 @@ function MainAppContent({ isDarkMode, setIsDarkMode }: MainContentProps) {
   const { user } = useAuthStore();
   const logoutMutation = useLogoutMutation();
 
+  // Sync state manager
+  const { isOnline, isSyncing, setOnline, syncPendingNotes } = useSyncStore();
+
+  // Offline-first hooks
+  const { data: notesList = [], isLoading: isLoadingNotes } = useNotesQuery();
+  const saveNoteMutation = useSaveNoteMutation();
+  const deleteNoteMutation = useDeleteNoteMutation();
+
   // States for interactive showcase elements
   const [inputText, setInputText] = useState('');
-  const [searchVal, setSearchVal] = useState('');
+  const [noteTitle, setNoteTitle] = useState('');
+  const [noteTagsStr, setNoteTagsStr] = useState('meeting, general');
   const [isRecording, setIsRecording] = useState(false);
-  const [isPlayingNote, setIsPlayingNote] = useState(false);
+  const [playingNoteId, setPlayingNoteId] = useState<string | null>(null);
   const [playProgress, setPlayProgress] = useState(0.4);
 
   // Modal, Dialog, Sheet visibility states
@@ -127,29 +148,54 @@ function MainAppContent({ isDarkMode, setIsDarkMode }: MainContentProps) {
   const [dialogVisible, setDialogVisible] = useState(false);
   const [sheetVisible, setSheetVisible] = useState(false);
 
-  // Mock Voice Note data
-  const sampleNote: VoiceNote = {
-    id: 'sample-1',
-    title: 'VoiceMind AI Design System Notes',
-    createdAt: new Date().toISOString(),
-    durationSec: 134,
-    filePath: 'file:///mock-note.m4a',
-    status: 'completed',
-    transcription:
-      'We are showcasing the new design system components using React Native Paper. All components support light and dark mode, accessibility, and desktop side sheets.',
-    tags: ['design-system', 'voice-mind', 'expo', 'monorepo'],
-  };
-
   // Simulate progress when playing
   useEffect(() => {
     let interval: NodeJS.Timeout;
-    if (isPlayingNote) {
+    if (playingNoteId) {
       interval = setInterval(() => {
         setPlayProgress((prev) => (prev >= 1 ? 0 : prev + 0.05));
       }, 500);
     }
     return () => clearInterval(interval);
-  }, [isPlayingNote]);
+  }, [playingNoteId]);
+
+  const handleCreateNote = async () => {
+    if (!noteTitle) {
+      alert('Please type a note title');
+      return;
+    }
+
+    const noteId = `note-${Date.now()}`;
+    const tags = noteTagsStr
+      .split(',')
+      .map((t) => t.trim())
+      .filter((t) => !!t);
+
+    const newNote: Omit<VoiceNote, 'tags' | 'transcription' | 'summary'> = {
+      id: noteId,
+      title: noteTitle,
+      durationSec: 35,
+      filePath: `file:///recordings/${noteId}.m4a`,
+      status: 'completed',
+    };
+
+    const mockTranscript =
+      'This is an offline-first voice note created locally using SQLite storage.';
+    const mockSummary = 'Offline-first database creation demo.';
+
+    try {
+      await saveNoteMutation.mutateAsync({
+        note: newNote,
+        transcription: mockTranscript,
+        summary: mockSummary,
+        tags,
+      });
+      setNoteTitle('');
+    } catch (err) {
+      console.error('Save Note Error:', err);
+      alert('Failed to save note');
+    }
+  };
 
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: theme.colors.background }]}>
@@ -179,66 +225,112 @@ function MainAppContent({ isDarkMode, setIsDarkMode }: MainContentProps) {
         </View>
       </View>
 
+      {/* Offline Status & Sync Banner */}
+      <View
+        style={[
+          styles.syncBanner,
+          { backgroundColor: isOnline ? 'rgba(20, 184, 166, 0.1)' : 'rgba(245, 158, 11, 0.1)' },
+          { borderColor: isOnline ? theme.colors.secondary : '#F59E0B' },
+        ]}
+      >
+        <View style={styles.syncLeft}>
+          <Text
+            variant="titleSmall"
+            style={{ color: isOnline ? theme.colors.secondary : '#F59E0B' }}
+          >
+            {isOnline ? '🟢 Online Mode' : '🟡 Offline Mode (SQLite queueing)'}
+          </Text>
+          <Text variant="bodySmall" style={styles.syncSubtext}>
+            {isOnline ? 'Changes are automatically synced.' : 'Database mutations are queued.'}
+          </Text>
+        </View>
+        <View style={styles.syncControls}>
+          <Switch value={isOnline} onValueChange={setOnline} />
+          <Button
+            title={isSyncing ? 'Syncing...' : 'Sync Now'}
+            onPress={syncPendingNotes}
+            variant="secondary"
+            disabled={!isOnline || isSyncing}
+            style={styles.syncNowBtn}
+          />
+        </View>
+      </View>
+
       <ScrollView contentContainerStyle={styles.scrollContainer}>
         {/* Responsive Grid Setup */}
         <View style={[styles.grid, isDesktop ? styles.desktopGrid : styles.mobileGrid]}>
-          {/* Column 1: Buttons & Inputs */}
+          {/* Column 1: Offline Notes list */}
           <View style={[styles.column, isDesktop ? styles.desktopColumn : null]}>
             <Text variant="titleLarge" style={styles.sectionHeader}>
-              Buttons & Inputs
+              Voice Notes ({notesList.length})
             </Text>
 
-            <Card style={styles.cardSpacing}>
-              <Text variant="titleMedium" style={styles.cardHeader}>
-                Button Variants
-              </Text>
-              <View style={styles.rowGap}>
-                <Button title="Primary Button" onPress={() => alert('Primary pressed')} />
-                <Button
-                  title="Secondary Button"
-                  onPress={() => alert('Secondary pressed')}
-                  variant="secondary"
-                />
-                <Button
-                  title="Danger Button"
-                  onPress={() => alert('Danger pressed')}
-                  variant="danger"
-                />
-                <Button title="Loading Button" onPress={() => {}} loading />
-              </View>
-            </Card>
+            {isLoadingNotes ? (
+              <ActivityIndicator color={theme.colors.primary} style={styles.loader} />
+            ) : notesList.length === 0 ? (
+              <Card style={styles.cardSpacing}>
+                <Text style={styles.emptyText}>
+                  No local voice notes found. Create one to test SQLite storage!
+                </Text>
+              </Card>
+            ) : (
+              notesList.map((note) => {
+                const isPlaying = playingNoteId === note.id;
+                // Add sync visual indicators
+                const isSynced =
+                  (note as VoiceNote & { sync_status?: string }).sync_status === 'synced';
+                const noteWithSyncTitle = {
+                  ...note,
+                  title: `${isSynced ? '☁️' : '⏳'} ${note.title}`,
+                };
+
+                return (
+                  <NoteCard
+                    key={note.id}
+                    note={noteWithSyncTitle}
+                    isPlaying={isPlaying}
+                    playbackProgress={playProgress}
+                    onPlayPause={() => {
+                      if (isPlaying) {
+                        setPlayingNoteId(null);
+                      } else {
+                        setPlayingNoteId(note.id);
+                        setPlayProgress(0);
+                      }
+                    }}
+                    onDelete={() => deleteNoteMutation.mutate(note.id)}
+                    onTagPress={(tag) => setSearchVal(tag)}
+                  />
+                );
+              })
+            )}
 
             <Card style={styles.cardSpacing}>
               <Text variant="titleMedium" style={styles.cardHeader}>
-                Text Inputs & Search
+                Create Voice Note (SQLite Database)
               </Text>
-              <SearchBar
-                value={searchVal}
-                onChangeText={setSearchVal}
-                onClear={() => setSearchVal('')}
+              <Input
+                label="Note Title"
+                value={noteTitle}
+                onChangeText={setNoteTitle}
+                placeholder="e.g. Design review meeting"
                 style={styles.fieldSpacing}
               />
               <Input
-                label="Sample Input"
-                value={inputText}
-                onChangeText={setInputText}
-                placeholder="Type something..."
+                label="Tags (Comma separated)"
+                value={noteTagsStr}
+                onChangeText={setNoteTagsStr}
+                placeholder="tag1, tag2"
                 style={styles.fieldSpacing}
               />
-              <Input
-                label="Secure Input"
-                value={inputText}
-                onChangeText={setInputText}
-                secureTextEntry
-                placeholder="Enter password"
-              />
+              <Button title="Save to Local SQLite" onPress={handleCreateNote} />
             </Card>
           </View>
 
-          {/* Column 2: Audio Primitives & Overlays */}
+          {/* Column 2: Components UI catalog */}
           <View style={[styles.column, isDesktop ? styles.desktopColumn : null]}>
             <Text variant="titleLarge" style={styles.sectionHeader}>
-              Audio & Cards
+              UI Components Catalog
             </Text>
 
             <Card style={styles.cardSpacing}>
@@ -263,22 +355,21 @@ function MainAppContent({ isDarkMode, setIsDarkMode }: MainContentProps) {
 
             <Card style={styles.cardSpacing}>
               <Text variant="titleMedium" style={styles.cardHeader}>
-                Note Card Component
+                Text Inputs & Buttons
               </Text>
-              <NoteCard
-                note={sampleNote}
-                isPlaying={isPlayingNote}
-                playbackProgress={playProgress}
-                onPlayPause={() => setIsPlayingNote(!isPlayingNote)}
-                onDelete={() => alert('Delete pressed')}
-                onTagPress={(tag) => alert(`Selected tag: #${tag}`)}
+              <SearchBar
+                value={searchVal}
+                onChangeText={setSearchVal}
+                onClear={() => setSearchVal('')}
+                style={styles.fieldSpacing}
               />
-            </Card>
-
-            <Card style={styles.cardSpacing}>
-              <Text variant="titleMedium" style={styles.cardHeader}>
-                Modals, Sheets & Dialogs
-              </Text>
+              <Input
+                label="Sample Input"
+                value={inputText}
+                onChangeText={setInputText}
+                placeholder="Type something..."
+              />
+              <Divider style={styles.divider} />
               <View style={styles.rowGap}>
                 <Button title="Open Standard Modal" onPress={() => setModalVisible(true)} />
                 <Button
@@ -400,6 +491,35 @@ const styles = StyleSheet.create({
   toggleLabel: {
     marginRight: 2,
   },
+  syncBanner: {
+    marginHorizontal: 16,
+    marginTop: 12,
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  syncLeft: {
+    flex: 1,
+    minWidth: 200,
+  },
+  syncSubtext: {
+    opacity: 0.7,
+    marginTop: 2,
+  },
+  syncControls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  syncNowBtn: {
+    minHeight: 36,
+    paddingVertical: 0,
+  },
   scrollContainer: {
     paddingHorizontal: 16,
     paddingTop: 16,
@@ -425,6 +545,11 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     marginBottom: 16,
     paddingLeft: 4,
+  },
+  emptyText: {
+    opacity: 0.6,
+    textAlign: 'center',
+    paddingVertical: 12,
   },
   cardSpacing: {
     marginBottom: 20,
@@ -454,6 +579,9 @@ const styles = StyleSheet.create({
   },
   fieldSpacing: {
     marginBottom: 12,
+  },
+  loader: {
+    marginVertical: 16,
   },
   overlayTitle: {
     fontWeight: '700',
