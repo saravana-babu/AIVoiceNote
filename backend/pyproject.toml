@@ -1,0 +1,16 @@
+[project]
+name = "voicemind-backend"
+version = "1.0.0"
+description = "VoiceMind AI FastAPI Backend"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.110.0",
+    "uvicorn>=0.28.0",
+    "pydantic>=2.6.0",
+    "python-multipart>=0.0.9",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"

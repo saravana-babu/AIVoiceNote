@@ -1,0 +1,53 @@
+# Node / JS
+node_modules/
+.npm/
+.yarn/
+dist/
+build/
+.turbo/
+
+# Expo / React Native
+.expo/
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.certs
+ios/
+android/
+web-build/
+.metro/
+
+# Python / FastAPI
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+pip-log.txt
+pip-delete-this-directory.txt
+.toast
+.cache
+.pytest_cache/
+.coverage
+htmlcov/
+.uv/
+
+# IDEs
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+.env*.local
+.env
+
+# OS
+.DS_Store
+Thumbs.db
