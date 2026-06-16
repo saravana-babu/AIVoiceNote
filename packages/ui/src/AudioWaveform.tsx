@@ -8,6 +8,7 @@ export interface AudioWaveformProps {
   progress?: number; // 0 to 1
   style?: ViewStyle;
   barCount?: number;
+  meteringHistory?: number[];
 }
 
 export const AudioWaveform: React.FC<AudioWaveformProps> = ({
@@ -16,6 +17,7 @@ export const AudioWaveform: React.FC<AudioWaveformProps> = ({
   progress = 0,
   style,
   barCount = 28,
+  meteringHistory,
 }) => {
   const theme = useTheme();
 
@@ -30,7 +32,24 @@ export const AudioWaveform: React.FC<AudioWaveformProps> = ({
     }),
   ).current;
 
-  // Animation values for each bar (for live recording visualizer)
+  // Calculate live heights if meteringHistory is supplied
+  const displayHeights = React.useMemo(() => {
+    if (meteringHistory && meteringHistory.length > 0) {
+      const historyLength = meteringHistory.length;
+      return Array.from({ length: barCount }, (_, i) => {
+        const historyIndex = historyLength - barCount + i;
+        if (historyIndex >= 0) {
+          const val = meteringHistory[historyIndex];
+          // val is normalized 0.0 to 1.0. Map it to height range 4 to 50
+          return Math.max(4, Math.round(val * 46));
+        }
+        return 4; // minimum height
+      });
+    }
+    return baseHeights;
+  }, [meteringHistory, barCount, baseHeights]);
+
+  // Animation values for each bar (for live recording visualizer fallback)
   const animatedScales = useRef(
     Array.from({ length: barCount }, () => new Animated.Value(1)),
   ).current;
@@ -38,7 +57,8 @@ export const AudioWaveform: React.FC<AudioWaveformProps> = ({
   useEffect(() => {
     let animLoop: Animated.CompositeAnimation | null = null;
 
-    if (isRecording) {
+    // Only run mock pulsating animation if recording and no live metering data is provided
+    if (isRecording && (!meteringHistory || meteringHistory.length === 0)) {
       // Create a pulsating/dancing wave animation
       const anims = animatedScales.map((val) =>
         Animated.loop(
@@ -73,7 +93,7 @@ export const AudioWaveform: React.FC<AudioWaveformProps> = ({
     return () => {
       animLoop?.stop();
     };
-  }, [isRecording, animatedScales]);
+  }, [isRecording, animatedScales, meteringHistory]);
 
   return (
     <View
@@ -88,7 +108,7 @@ export const AudioWaveform: React.FC<AudioWaveformProps> = ({
       accessibilityRole="image"
     >
       <View style={styles.waveRow}>
-        {baseHeights.map((height, index) => {
+        {displayHeights.map((height, index) => {
           // Calculate if this bar has been played past
           const isPlayed = progress > index / barCount;
           const barColor = isRecording
@@ -101,6 +121,8 @@ export const AudioWaveform: React.FC<AudioWaveformProps> = ({
             transform: [{ scaleY: animatedScales[index] }],
           };
 
+          const useAnim = isRecording && (!meteringHistory || meteringHistory.length === 0);
+
           return (
             <Animated.View
               key={index}
@@ -110,7 +132,7 @@ export const AudioWaveform: React.FC<AudioWaveformProps> = ({
                   height,
                   backgroundColor: barColor,
                 },
-                isRecording && animatedStyle,
+                useAnim && animatedStyle,
               ]}
             />
           );

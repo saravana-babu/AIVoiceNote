@@ -10,7 +10,10 @@
     "lint": "eslint \"src/**/*.{ts,tsx}\""
   },
   "dependencies": {
-    "@voicemind/shared": "*"
+    "@voicemind/shared": "*",
+    "expo-av": "*",
+    "expo-file-system": "*",
+    "expo-modules-core": "*"
   },
   "peerDependencies": {
     "react": "*",

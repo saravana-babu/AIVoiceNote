@@ -31,12 +31,14 @@ export class NoteRepository {
         const transcript = mockDb.transcripts.get(note.id)?.text;
         const summary = mockDb.summaries.get(note.id)?.text;
         const noteTags = mockDb.tags.filter((t) => t.note_id === note.id).map((t) => t.tag);
+        const rest = { ...note };
+        delete rest.sync_status;
         return {
-          ...note,
+          ...rest,
           transcription: transcript,
           summary,
           tags: noteTags,
-        };
+        } as VoiceNote;
       });
     }
 
@@ -76,6 +78,7 @@ export class NoteRepository {
         durationSec: raw.duration_sec,
         filePath: raw.file_path,
         status: raw.status as VoiceNote['status'],
+        createdAt: raw.created_at,
         transcription: transcriptRaw?.text,
         summary: summaryRaw?.text,
         tags: tagsRaw.map((t) => t.tag),
@@ -104,8 +107,8 @@ export class NoteRepository {
         durationSec: note.durationSec,
         filePath: note.filePath,
         status: note.status,
+        createdAt: note.createdAt || nowStr,
         sync_status: 'pending',
-        created_at: nowStr,
       });
 
       if (transcription) {

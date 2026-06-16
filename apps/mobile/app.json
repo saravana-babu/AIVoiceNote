@@ -14,14 +14,18 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.voicemind.app"
+      "bundleIdentifier": "com.voicemind.app",
+      "infoPlist": {
+        "UIBackgroundModes": ["audio"]
+      }
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#121212"
       },
-      "package": "com.voicemind.app"
+      "package": "com.voicemind.app",
+      "permissions": ["RECORD_AUDIO", "FOREGROUND_SERVICE", "MODIFY_AUDIO_SETTINGS"]
     },
     "web": {
       "favicon": "./assets/favicon.png",

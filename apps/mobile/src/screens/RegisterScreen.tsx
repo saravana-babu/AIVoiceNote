@@ -45,7 +45,7 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({ onNavigateToLogi
 
   return (
     <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
-      <Card style={[styles.card, isDesktop && styles.desktopCard]}>
+      <Card style={StyleSheet.flatten([styles.card, isDesktop && styles.desktopCard])}>
         <View style={styles.header}>
           <Text variant="headlineLarge" style={styles.title}>
             Create Account

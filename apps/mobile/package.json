@@ -27,7 +27,9 @@
     "expo-secure-store": "~14.0.1",
     "zustand": "^4.5.5",
     "@tanstack/react-query": "^5.59.16",
-    "expo-sqlite": "*"
+    "expo-sqlite": "*",
+    "expo-av": "*",
+    "expo-file-system": "*"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",

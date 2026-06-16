@@ -15,7 +15,7 @@ export function useLoginMutation() {
   const setAuth = useAuthStore((state) => state.setAuth);
 
   return useMutation({
-    mutationFn: async ({ email, password }) => {
+    mutationFn: async ({ email, password }: { email: string; password: string }) => {
       const res = await fetch(`${API_URL}/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -37,7 +37,15 @@ export function useRegisterMutation() {
   const setAuth = useAuthStore((state) => state.setAuth);
 
   return useMutation({
-    mutationFn: async ({ email, password, displayName }) => {
+    mutationFn: async ({
+      email,
+      password,
+      displayName,
+    }: {
+      email: string;
+      password: string;
+      displayName: string;
+    }) => {
       const res = await fetch(`${API_URL}/auth/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -59,7 +67,7 @@ export function useGoogleLoginMutation() {
   const setAuth = useAuthStore((state) => state.setAuth);
 
   return useMutation({
-    mutationFn: async ({ email }) => {
+    mutationFn: async ({ email }: { email: string }) => {
       // Send mock token payload based on user email
       const token = `mock-google-${email}`;
       const res = await fetch(`${API_URL}/auth/oauth/google`, {
@@ -83,7 +91,7 @@ export function useAppleLoginMutation() {
   const setAuth = useAuthStore((state) => state.setAuth);
 
   return useMutation({
-    mutationFn: async ({ email }) => {
+    mutationFn: async ({ email }: { email: string }) => {
       const token = `mock-apple-${email}`;
       const res = await fetch(`${API_URL}/auth/oauth/apple`, {
         method: 'POST',
@@ -143,7 +151,7 @@ export function useResetPasswordRequestMutation() {
 
 export function useResetPasswordConfirmMutation() {
   return useMutation({
-    mutationFn: async ({ token, newPassword }) => {
+    mutationFn: async ({ token, newPassword }: { token: string; newPassword: string }) => {
       const res = await fetch(`${API_URL}/auth/password-reset/confirm`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

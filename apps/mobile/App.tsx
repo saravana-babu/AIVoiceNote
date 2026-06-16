@@ -35,6 +35,7 @@ import { ResetPasswordScreen } from './src/screens/ResetPasswordScreen.js';
 import { initializeDatabase } from './src/database/dbSetup.js';
 import { useSyncStore } from './src/store/syncStore.js';
 import { useNotesQuery, useSaveNoteMutation, useDeleteNoteMutation } from './src/hooks/useNotes.js';
+import { useAudioRecorder, AudioFormat, CrashRecoveryRecord } from '@voicemind/audio';
 
 // Setup TanStack Query Client
 const queryClient = new QueryClient();
@@ -139,9 +140,37 @@ function MainAppContent({ isDarkMode, setIsDarkMode }: MainContentProps) {
   const [inputText, setInputText] = useState('');
   const [noteTitle, setNoteTitle] = useState('');
   const [noteTagsStr, setNoteTagsStr] = useState('meeting, general');
-  const [isRecording, setIsRecording] = useState(false);
   const [playingNoteId, setPlayingNoteId] = useState<string | null>(null);
   const [playProgress, setPlayProgress] = useState(0.4);
+  const [searchVal, setSearchVal] = useState('');
+
+  // Audio recording engine state/hooks
+  const [currentRecordingFormat, setCurrentRecordingFormat] = useState<AudioFormat>('m4a');
+  const [activeNoteId, setActiveNoteId] = useState<string | undefined>(undefined);
+  const {
+    isRecording: isEngineRecording,
+    isPaused: isEnginePaused,
+    durationSec: recordDurationSec,
+    meteringHistory,
+    startRecording,
+    pauseRecording,
+    resumeRecording,
+    stopRecording,
+    checkCrashRecovery,
+    clearCrashRecovery,
+  } = useAudioRecorder(activeNoteId);
+
+  const [recoveryRecord, setRecoveryRecord] = useState<CrashRecoveryRecord | null>(null);
+
+  useEffect(() => {
+    async function checkRecovery() {
+      const record = await checkCrashRecovery();
+      if (record) {
+        setRecoveryRecord(record);
+      }
+    }
+    checkRecovery();
+  }, [checkCrashRecovery]);
 
   // Modal, Dialog, Sheet visibility states
   const [modalVisible, setModalVisible] = useState(false);
@@ -174,6 +203,7 @@ function MainAppContent({ isDarkMode, setIsDarkMode }: MainContentProps) {
     const newNote: Omit<VoiceNote, 'tags' | 'transcription' | 'summary'> = {
       id: noteId,
       title: noteTitle,
+      createdAt: new Date().toISOString(),
       durationSec: 35,
       filePath: `file:///recordings/${noteId}.m4a`,
       status: 'completed',
@@ -255,6 +285,53 @@ function MainAppContent({ isDarkMode, setIsDarkMode }: MainContentProps) {
           />
         </View>
       </View>
+
+      {recoveryRecord && (
+        <Card style={StyleSheet.flatten([styles.recoveryCard, { marginHorizontal: 16 }])}>
+          <Text variant="titleMedium" style={{ color: theme.colors.error, fontWeight: '700' }}>
+            ⚠️ Interrupted Recording Detected
+          </Text>
+          <Text variant="bodyMedium" style={{ marginVertical: 8 }}>
+            An active recording session from {new Date(recoveryRecord.startedAt).toLocaleString()}{' '}
+            was interrupted.
+          </Text>
+          <View style={styles.rowGapHorizontal}>
+            <Button
+              title="Recover Note"
+              onPress={async () => {
+                const noteId = recoveryRecord.noteId;
+                const newNote = {
+                  id: noteId,
+                  title: `Recovered Note (${recoveryRecord.format.toUpperCase()})`,
+                  createdAt: recoveryRecord.startedAt,
+                  durationSec: 0,
+                  filePath: recoveryRecord.tempUri,
+                  status: 'completed' as const,
+                };
+                await saveNoteMutation.mutateAsync({
+                  note: newNote,
+                  transcription: 'Recovered from interrupted recording session.',
+                  summary: 'Crash recovery note.',
+                  tags: ['recovered', recoveryRecord.format],
+                });
+                await clearCrashRecovery();
+                setRecoveryRecord(null);
+                alert('Note recovered successfully!');
+              }}
+              style={styles.recoveryBtn}
+            />
+            <Button
+              title="Discard"
+              variant="danger"
+              onPress={async () => {
+                await clearCrashRecovery();
+                setRecoveryRecord(null);
+              }}
+              style={styles.recoveryBtn}
+            />
+          </View>
+        </Card>
+      )}
 
       <ScrollView contentContainerStyle={styles.scrollContainer}>
         {/* Responsive Grid Setup */}
@@ -339,18 +416,74 @@ function MainAppContent({ isDarkMode, setIsDarkMode }: MainContentProps) {
               </Text>
               <View style={styles.centerRow}>
                 <RecordingButton
-                  isRecording={isRecording}
-                  onPress={() => setIsRecording(!isRecording)}
+                  isRecording={isEngineRecording}
+                  onPress={async () => {
+                    if (isEngineRecording) {
+                      const meta = await stopRecording();
+                      if (meta) {
+                        const noteId = activeNoteId || `note-${Date.now()}`;
+                        const newNote = {
+                          id: noteId,
+                          title: `Voice Note ${new Date().toLocaleTimeString()}`,
+                          createdAt: new Date().toISOString(),
+                          durationSec: meta.durationSec,
+                          filePath: meta.uri,
+                          status: 'completed' as const,
+                        };
+                        await saveNoteMutation.mutateAsync({
+                          note: newNote,
+                          transcription: 'Audio recorded successfully.',
+                          summary: 'VoiceMind Audio Engine Recording',
+                          tags: ['recording', meta.format],
+                        });
+                        setActiveNoteId(undefined);
+                        alert('Recording saved to local SQLite database!');
+                      }
+                    } else {
+                      const newId = `note-${Date.now()}`;
+                      setActiveNoteId(newId);
+                      await startRecording(currentRecordingFormat);
+                    }
+                  }}
                 />
-                <Text style={styles.recordingLabel}>
-                  {isRecording ? 'Recording active... (pulsating)' : 'Tap circle to record'}
-                </Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.recordingLabel}>
+                    {isEngineRecording
+                      ? `Recording active: ${Math.floor(recordDurationSec / 60)
+                          .toString()
+                          .padStart(2, '0')}:${(recordDurationSec % 60)
+                          .toString()
+                          .padStart(2, '0')}`
+                      : 'Tap circle to record'}
+                  </Text>
+                  {!isEngineRecording && (
+                    <View style={styles.formatRow}>
+                      {(['m4a', 'wav', 'mp3'] as AudioFormat[]).map((fmt) => (
+                        <Button
+                          key={fmt}
+                          title={fmt.toUpperCase()}
+                          onPress={() => setCurrentRecordingFormat(fmt)}
+                          variant={currentRecordingFormat === fmt ? 'primary' : 'secondary'}
+                          style={styles.formatBtn}
+                        />
+                      ))}
+                    </View>
+                  )}
+                  {isEngineRecording && (
+                    <Button
+                      title={isEnginePaused ? 'Resume' : 'Pause'}
+                      onPress={isEnginePaused ? resumeRecording : pauseRecording}
+                      variant="secondary"
+                      style={styles.controlBtn}
+                    />
+                  )}
+                </View>
               </View>
               <Divider style={styles.divider} />
               <Text variant="bodySmall" style={styles.subtext}>
                 Dynamic Waveform (Active during recording)
               </Text>
-              <AudioWaveform isRecording={isRecording} />
+              <AudioWaveform isRecording={isEngineRecording} meteringHistory={meteringHistory} />
             </Card>
 
             <Card style={styles.cardSpacing}>
@@ -597,5 +730,38 @@ const styles = StyleSheet.create({
     margin: 24,
     right: 0,
     bottom: 0,
+  },
+  formatRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 8,
+  },
+  formatBtn: {
+    minWidth: 50,
+    minHeight: 28,
+    paddingVertical: 0,
+  },
+  controlBtn: {
+    marginTop: 8,
+    minHeight: 28,
+    paddingVertical: 0,
+    alignSelf: 'flex-start',
+  },
+  rowGapHorizontal: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 12,
+  },
+  recoveryCard: {
+    marginHorizontal: 16,
+    marginTop: 12,
+    padding: 16,
+    borderWidth: 1.5,
+    borderColor: '#EF4444',
+    backgroundColor: 'rgba(239, 68, 68, 0.05)',
+  },
+  recoveryBtn: {
+    flex: 1,
   },
 });
