@@ -1,5 +1,6 @@
 import { getDbConnection, mockDb } from './dbSetup.js';
 import { VoiceNote } from '@voicemind/shared';
+import { MeetingMinutes } from '@voicemind/api';
 
 export interface SyncTask {
   id: number;
@@ -234,6 +235,91 @@ export class NoteRepository {
     );
   }
 
+  // --- DIRECT SERVER WRITE METHODS (DO NOT QUEUE IN SYNC QUEUE) ---
+  async saveServerNote(note: VoiceNote): Promise<void> {
+    const db = await getDbConnection();
+    const nowStr = new Date().toISOString();
+
+    if (!db) {
+      mockDb.notes.set(note.id, {
+        id: note.id,
+        title: note.title,
+        durationSec: note.durationSec,
+        filePath: note.filePath,
+        status: note.status,
+        createdAt: note.createdAt || nowStr,
+        sync_status: 'synced',
+      });
+
+      if (note.transcription) {
+        mockDb.transcripts.set(note.id, { note_id: note.id, text: note.transcription });
+      }
+      if (note.summary) {
+        mockDb.summaries.set(note.id, { note_id: note.id, text: note.summary });
+      }
+      mockDb.tags = mockDb.tags.filter((t) => t.note_id !== note.id);
+      note.tags.forEach((tag) => {
+        mockDb.tags.push({ note_id: note.id, tag });
+      });
+      return;
+    }
+
+    const existing = await db.getFirstAsync('SELECT id FROM notes WHERE id = ?', [note.id]);
+    if (!existing) {
+      await db.runAsync(
+        'INSERT INTO notes (id, title, duration_sec, file_path, status, sync_status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [
+          note.id,
+          note.title,
+          note.durationSec,
+          note.filePath,
+          note.status,
+          'synced',
+          note.createdAt || nowStr,
+        ],
+      );
+    } else {
+      await db.runAsync(
+        'UPDATE notes SET title = ?, duration_sec = ?, file_path = ?, status = ?, sync_status = ? WHERE id = ?',
+        [note.title, note.durationSec, note.filePath, note.status, 'synced', note.id],
+      );
+    }
+
+    if (note.transcription) {
+      await db.runAsync('INSERT OR REPLACE INTO transcripts (note_id, text) VALUES (?, ?)', [
+        note.id,
+        note.transcription,
+      ]);
+    }
+
+    if (note.summary) {
+      await db.runAsync('INSERT OR REPLACE INTO summaries (note_id, text) VALUES (?, ?)', [
+        note.id,
+        note.summary,
+      ]);
+    }
+
+    await db.runAsync('DELETE FROM tags WHERE note_id = ?', [note.id]);
+    for (const tag of note.tags) {
+      await db.runAsync('INSERT INTO tags (note_id, tag) VALUES (?, ?)', [note.id, tag]);
+    }
+  }
+
+  async deleteServerNote(id: string): Promise<void> {
+    const db = await getDbConnection();
+    if (!db) {
+      mockDb.notes.delete(id);
+      mockDb.transcripts.delete(id);
+      mockDb.summaries.delete(id);
+      mockDb.meeting_minutes.delete(id);
+      mockDb.tags = mockDb.tags.filter((t) => t.note_id !== id);
+      return;
+    }
+
+    await db.runAsync('DELETE FROM meeting_minutes WHERE note_id = ?', [id]);
+    await db.runAsync('DELETE FROM notes WHERE id = ?', [id]);
+  }
+
   // --- SYNC QUEUE FETCH & FLUSH ---
   async getPendingTasks(): Promise<SyncTask[]> {
     const db = await getDbConnection();
@@ -263,5 +349,133 @@ export class NoteRepository {
 
     // Update note status
     await db.runAsync('UPDATE notes SET sync_status = ? WHERE id = ?', [syncStatus, recordId]);
+  }
+
+  // --- MEETING MINUTES CRUD ---
+  async getMeetingMinutes(noteId: string): Promise<MeetingMinutes | null> {
+    const db = await getDbConnection();
+    if (!db) {
+      return mockDb.meeting_minutes.get(noteId) || null;
+    }
+
+    const row = await db.getFirstAsync<{
+      note_id: string;
+      overview: string;
+      agenda: string;
+      discussion_points: string;
+      decisions: string;
+      risks: string;
+      action_items: string;
+      provider: string;
+      model: string;
+      prompt_tokens: number;
+      completion_tokens: number;
+      created_at: string;
+      updated_at: string;
+    }>('SELECT * FROM meeting_minutes WHERE note_id = ?', [noteId]);
+
+    if (!row) return null;
+
+    try {
+      return {
+        note_id: row.note_id,
+        overview: row.overview,
+        agenda: JSON.parse(row.agenda),
+        discussion_points: JSON.parse(row.discussion_points),
+        decisions: JSON.parse(row.decisions),
+        risks: JSON.parse(row.risks),
+        action_items: JSON.parse(row.action_items),
+        provider: row.provider,
+        model: row.model,
+        prompt_tokens: row.prompt_tokens,
+        completion_tokens: row.completion_tokens,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+      };
+    } catch (err) {
+      console.error('Failed to parse meeting minutes from SQLite', err);
+      return null;
+    }
+  }
+
+  async saveMeetingMinutes(noteId: string, minutes: MeetingMinutes): Promise<void> {
+    const db = await getDbConnection();
+    if (!db) {
+      mockDb.meeting_minutes.set(noteId, minutes);
+      return;
+    }
+
+    const existing = await db.getFirstAsync(
+      'SELECT note_id FROM meeting_minutes WHERE note_id = ?',
+      [noteId],
+    );
+
+    const agendaStr = JSON.stringify(minutes.agenda);
+    const discussionPointsStr = JSON.stringify(minutes.discussion_points);
+    const decisionsStr = JSON.stringify(minutes.decisions);
+    const risksStr = JSON.stringify(minutes.risks);
+    const actionItemsStr = JSON.stringify(minutes.action_items);
+
+    if (existing) {
+      await db.runAsync(
+        `UPDATE meeting_minutes SET 
+          overview = ?, 
+          agenda = ?, 
+          discussion_points = ?, 
+          decisions = ?, 
+          risks = ?, 
+          action_items = ?, 
+          provider = ?, 
+          model = ?, 
+          prompt_tokens = ?, 
+          completion_tokens = ?, 
+          updated_at = ? 
+         WHERE note_id = ?`,
+        [
+          minutes.overview,
+          agendaStr,
+          discussionPointsStr,
+          decisionsStr,
+          risksStr,
+          actionItemsStr,
+          minutes.provider,
+          minutes.model,
+          minutes.prompt_tokens,
+          minutes.completion_tokens,
+          minutes.updated_at,
+          noteId,
+        ],
+      );
+    } else {
+      await db.runAsync(
+        `INSERT INTO meeting_minutes (
+          note_id, overview, agenda, discussion_points, decisions, risks, action_items, provider, model, prompt_tokens, completion_tokens, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          noteId,
+          minutes.overview,
+          agendaStr,
+          discussionPointsStr,
+          decisionsStr,
+          risksStr,
+          actionItemsStr,
+          minutes.provider,
+          minutes.model,
+          minutes.prompt_tokens,
+          minutes.completion_tokens,
+          minutes.created_at,
+          minutes.updated_at,
+        ],
+      );
+    }
+  }
+
+  async deleteMeetingMinutes(noteId: string): Promise<void> {
+    const db = await getDbConnection();
+    if (!db) {
+      mockDb.meeting_minutes.delete(noteId);
+      return;
+    }
+    await db.runAsync('DELETE FROM meeting_minutes WHERE note_id = ?', [noteId]);
   }
 }

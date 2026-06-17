@@ -52,3 +52,7 @@ htmlcov/
 # OS
 .DS_Store
 Thumbs.db
+
+# VoiceMind Local Testing Files
+backend/sent_emails/
+backend/uploads/

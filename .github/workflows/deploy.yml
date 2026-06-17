@@ -1,0 +1,71 @@
+name: CD Pipeline
+
+on:
+  push:
+    branches: [main, master]
+
+jobs:
+  test-and-lint:
+    name: Run Linter and Unit Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js (for frontend checks)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install Node Dependencies
+        run: npm ci
+
+      - name: Check Frontend Formatting
+        run: npm run format:check
+
+      - name: Check Frontend Lints
+        run: npm run lint
+
+      - name: Set up Python 3.12 (for backend tests)
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install uv
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+
+      - name: Install Backend Dependencies
+        run: |
+          cd backend
+          uv sync
+
+      - name: Run Pytest
+        run: |
+          cd backend
+          # Run tests with mock env vars to avoid needing real API keys during CI
+          GOOGLE_API_KEY=mock-key SECRET_KEY=test-signing-key-minimum-32-characters-length DATABASE_URL=sqlite:///./test.db uv run pytest
+
+  deploy:
+    name: Deploy to DigitalOcean Droplet
+    needs: test-and-lint
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Execute Remote Deployment SSH Commands
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.DROPLET_IP }}
+          username: ${{ secrets.DROPLET_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          passphrase: ${{ secrets.SSH_PASSPHRASE }} # Optional passphrase
+          port: 22
+          script: |
+            cd /app/voicemind
+            chmod +x deploy.sh
+            ./deploy.sh

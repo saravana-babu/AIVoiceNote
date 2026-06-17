@@ -75,3 +75,5 @@ class SecureStorage implements KeyValueStorage {
 
 export const appStorage: KeyValueStorage = new SecureStorage();
 export default appStorage;
+
+export * from './cloud';

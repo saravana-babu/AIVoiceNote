@@ -11,6 +11,8 @@
   },
   "dependencies": {
     "@voicemind/shared": "*",
+    "@voicemind/api": "*",
+    "expo-file-system": "*",
     "@react-native-async-storage/async-storage": "^1.23.1",
     "expo-secure-store": "~14.0.1"
   },

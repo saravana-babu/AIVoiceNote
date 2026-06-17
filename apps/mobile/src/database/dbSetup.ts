@@ -1,6 +1,7 @@
 /* eslint-disable no-console */
 import * as SQLite from 'expo-sqlite';
 import { VoiceNote } from '@voicemind/shared';
+import { MeetingMinutes } from '@voicemind/api';
 
 let dbInstance: SQLite.SQLiteDatabase | null = null;
 let isInMemoryMock = false;
@@ -19,6 +20,7 @@ export const mockDb = {
   transcripts: new Map<string, { note_id: string; text: string }>(),
   summaries: new Map<string, { note_id: string; text: string }>(),
   tags: [] as { note_id: string; tag: string }[],
+  meeting_minutes: new Map<string, MeetingMinutes>(),
   sync_queue: [] as {
     id: number;
     action: 'CREATE' | 'UPDATE' | 'DELETE';
@@ -89,6 +91,23 @@ export async function initializeDatabase() {
       note_id TEXT NOT NULL,
       tag TEXT NOT NULL,
       PRIMARY KEY(note_id, tag),
+      FOREIGN KEY(note_id) REFERENCES notes(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS meeting_minutes (
+      note_id TEXT PRIMARY KEY NOT NULL,
+      overview TEXT NOT NULL,
+      agenda TEXT NOT NULL,
+      discussion_points TEXT NOT NULL,
+      decisions TEXT NOT NULL,
+      risks TEXT NOT NULL,
+      action_items TEXT NOT NULL,
+      provider TEXT NOT NULL,
+      model TEXT NOT NULL,
+      prompt_tokens INTEGER NOT NULL,
+      completion_tokens INTEGER NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
       FOREIGN KEY(note_id) REFERENCES notes(id) ON DELETE CASCADE
     );
 
