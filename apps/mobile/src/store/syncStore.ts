@@ -4,6 +4,7 @@ import { NoteRepository } from '../database/NoteRepository.js';
 import { useAuthStore } from './authStore.js';
 import { appStorage } from '@voicemind/storage';
 import { VoiceNote } from '@voicemind/shared';
+import { config } from '../config.js';
 
 export interface SyncState {
   isOnline: boolean;
@@ -16,7 +17,7 @@ export interface SyncState {
   stopScheduler: () => void;
 }
 
-const API_URL = 'http://localhost:8000/api/v1';
+const API_URL = config.API_URL;
 let syncIntervalId: ReturnType<typeof setInterval> | null = null;
 
 export const useSyncStore = create<SyncState>((set, get) => ({

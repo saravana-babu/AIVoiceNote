@@ -2,8 +2,9 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ApiClient, NoteEnhancement } from '@voicemind/api';
 import { useAuthStore } from '../store/authStore.js';
 import { useSyncStore } from '../store/syncStore.js';
+import { config } from '../config.js';
 
-const API_URL = 'http://localhost:8000/api/v1';
+const API_URL = config.API_URL;
 
 function getApiClient(): ApiClient {
   const accessToken = useAuthStore.getState().accessToken || undefined;

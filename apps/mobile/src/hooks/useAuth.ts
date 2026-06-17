@@ -1,8 +1,9 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuthStore } from '../store/authStore.js';
 import { UserProfile } from '@voicemind/shared';
+import { config } from '../config.js';
 
-const API_URL = 'http://localhost:8000'; // Default API Host
+const API_URL = config.API_HOST;
 
 interface AuthResponse {
   access_token: string;

@@ -3,6 +3,7 @@ import * as FileSystem from 'expo-file-system';
 import { ApiClient } from '@voicemind/api';
 import { CloudStorageService } from '@voicemind/storage';
 import { useAuthStore } from '../store/authStore.js';
+import { config } from '../config.js';
 
 const MULTIPART_THRESHOLD = 5 * 1024 * 1024; // 5MB threshold for multipart upload
 
@@ -32,7 +33,7 @@ export function useCloudUpload() {
         }
 
         const apiClient = new ApiClient({
-          baseUrl: 'http://localhost:8000/api/v1',
+          baseUrl: config.API_URL,
           token: accessToken,
         });
         const storageService = new CloudStorageService({ apiClient });
@@ -95,7 +96,7 @@ export function useCloudDownload() {
         }
 
         const apiClient = new ApiClient({
-          baseUrl: 'http://localhost:8000/api/v1',
+          baseUrl: config.API_URL,
           token: accessToken,
         });
         const storageService = new CloudStorageService({ apiClient });
